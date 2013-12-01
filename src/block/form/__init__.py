@@ -25,7 +25,11 @@ class FieldProxy(object):
             return v
 
     def __getattr__(self, k):
-        return getattr(self.node, k)
+        v = getattr(self.node, k)
+        if hasattr(v, "typ"):
+            return self.__class__(self, k, v)
+        else:
+            return v
 
     def clone(self):
         if isinstance(self.schema, FieldProxy):
