@@ -92,12 +92,12 @@ def register_validation(registry, required, schema, name):
     schema_control = registry.getUtility(ISchemaControl)
     error_control = registry.getUtility(IErrorControl)
     schema_class = schema_control.get_class(schema)
-    queue = registry.getUtility(IValidationRepository)[schema_class]
+    repository = registry.getUtility(IValidationRepository)
     def create_validation(schema):
         return ValidationBoundary(schema_control,
                                   error_control,
                                   schema,
-                                  queue
+                                  repository[schema_class]
         )
     create_validation.__name__ = "validation_for_{schema!r}".format(schema=schema)
     registry.adapters.register(required, IValidationBoundaryFactory, name, create_validation)
