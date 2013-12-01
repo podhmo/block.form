@@ -1,11 +1,12 @@
 # -*- coding:utf-8 -*-
-from zope.interface import providedBy
+from zope.interface import providedBy, provider
 from collections import defaultdict
 from ..interfaces import(
     ISchemaControl,
     IErrorControl,
     IValidationRepository,
-    IValidationBoundaryFactory
+    IValidationBoundaryFactory,
+    ISequence
 )
 
 class ValidationError(Exception):
@@ -56,20 +57,26 @@ def includeme(config):
     add_block_directive(config, "set_schema_control", set_schema_control)
     add_block_directive(config, "set_error_control", set_error_control)
     add_block_directive(config, "set_validation_repository", set_validation_repository)
+    add_block_directive(config, "add_error_mapping", add_error_mapping)
 
     from .core import ColanderSchemaControl
     config.block_set_schema_control(ColanderSchemaControl())
 
     from pyramid.exceptions import ConfigurationError
-    def check__dependent_components():
+    def check__dependent_components(config):
         control = config.registry.queryUtility(IErrorControl)
         if control is None:
             raise ConfigurationError("forgetting:: calling config.block_set_error_control ?\n (please autocommit option is false)")
 
+        queue = config.registry.adapters.lookup1(IErrorControl, ISequence)
+        if queue:
+            for mapping, strict in queue:
+                control.update_mapping(mapping, strict=strict)
+
         repository = config.registry.queryUtility(IValidationRepository)
         if repository is None:
             raise ConfigurationError("forgeting:: calling config.block_set_validation_repository ?\n (please autocommit option is false)")
-    config.action(None, check__dependent_components, order=9999)
+    config.action(None, check__dependent_components, args=(config, ), order=9999)
 
 
 ## use definition phase
@@ -84,6 +91,14 @@ def set_schema_control(config, control):
 
 def set_error_control(config, control):
     config.registry.registerUtility(config.maybe_dotted(control), IErrorControl)
+
+def add_error_mapping(config, mapping, strict=True):
+    queue = config.registry.adapters.lookup1(IErrorControl, ISequence)
+    if queue is None:
+        queue = []
+        config.registry.adapters.register([IErrorControl], ISequence, "", queue)
+    queue.append((mapping, strict))
+
 
 def set_validation_repository(config, repository):
     config.registry.registerUtility(config.maybe_dotted(repository), IValidationRepository)

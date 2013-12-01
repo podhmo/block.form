@@ -1,6 +1,10 @@
 # -*- coding:utf-8 -*-
 from zope.interface import Interface
 
+class ISequence(Interface):
+    def append(x):
+        pass
+
 class IBlockSchema(Interface):
     pass
 

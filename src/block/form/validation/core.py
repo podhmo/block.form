@@ -8,7 +8,15 @@ logger = logging.getLogger(__name__)
 
 from . import ValidationError
 from .pickup import generate_pikup_function
+from zope.interface import implementer
+from pyramid.exceptions import ConfigurationError
+from ..interfaces import (
+    ISchemaControl,
+    IErrorControl,
+    IValidationRepository
+)
 
+@implementer(ISchemaControl)
 class ColanderSchemaControl(object):
     def get_class(self, schema):
         if isinstance(schema, co._SchemaMeta):
@@ -22,12 +30,21 @@ class ColanderSchemaControl(object):
         except Invalid as e:
             raise ValidationError(e.asdict())
 
-
+@implementer(IErrorControl)
 class AppendListErrorControl(object):
     def __init__(self, mapping, on_not_defined=None, fallback=None):
         self.mapping = mapping
         self.on_not_defined = on_not_defined or self.default_not_defined
         self.fallback = fallback or self.default_fallback
+
+    def update_mapping(self, other, strict=True):
+        if strict:
+            for k, v in other.items():
+                if k in self.mapping:
+                    raise ConfigurationError("{k} is already defined".format(k=k))
+                self.mapping[k] = v
+        else:
+            self.mapping.update(other)
 
     def __call__(self, data, name, exc, errors):
         try:
@@ -111,7 +128,7 @@ class ValidationIterator(object):
             else:
                 yield name, validation
 
-
+@implementer(IValidationRepository)
 class ValidationRepository(object):
     def __init__(self, QueueClass=None):
         self.QueueClass = QueueClass or ValidationQueue

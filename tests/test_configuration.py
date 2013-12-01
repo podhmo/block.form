@@ -33,6 +33,30 @@ class ConfigurationRemindTests(PyramidTest):
         self.config.block_set_error_control(object())
         self.config.commit()
 
+    def test_add_mapping__strict(self):
+        from pyramid.exceptions import ConfigurationError
+        from block.form.validation.core import AppendListErrorControl
+        mapping = {}
+        self.config.block_set_error_control(AppendListErrorControl(mapping))
+        self.config.block_set_validation_repository(object())
+
+        self.config.block_add_error_mapping({"a": "b", "x": "1", "y": 2}, strict=True)
+        self.config.block_add_error_mapping({"x": 2, "z": 3}, strict=True)
+
+        with self.assertRaises(ConfigurationError):
+            self.config.commit()
+
+
+    def test_add_mapping__nostrict(self):
+        from block.form.validation.core import AppendListErrorControl
+        mapping = {}
+        self.config.block_set_error_control(AppendListErrorControl(mapping))
+        self.config.block_set_validation_repository(object())
+
+        self.config.block_add_error_mapping({"a": "b", "x": "1", "y": 2}, strict=False)
+        self.config.block_add_error_mapping({"x": 2, "z": 3}, strict=False)
+        self.config.commit()
+        self.assertEqual(mapping, {'a': 'b', 'z': 3 , 'y': 2, 'x': 2})
 
 if __name__ == '__main__':
     unittest.main()
