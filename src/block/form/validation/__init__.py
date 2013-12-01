@@ -72,7 +72,7 @@ def register_validation(registry, required, name):
 
     @provider(IValidationBoundaryFactory)
     def factory(required):
-        queue = repository[required]
+        queue = repository[required+(name, )] #hmm.
         return ValidationBoundary(error_control, queue)
     registry.adapters.register(required, IValidationBoundaryFactory, name, factory)
     return factory
@@ -84,14 +84,15 @@ def normalize_provided1(provided):
     else:
         return providedBy(provided)
 
-def get_validation(request, provided, name=""):
-    iface = normalize_provided1(provided)
+def get_validation(request, required, name=""):
+    if not isinstance(required, (tuple, list)):
+        required = tuple(normalize_provided1(required))
     registry = request.registry
-    factory = registry.adapters.lookup([iface], IValidationBoundaryFactory, name=name)
+    factory = registry.adapters.lookup(required, IValidationBoundaryFactory, name=name)
     if factory is None:
         ## speedup
-        factory = register_validation(registry, iface, name)
-    return factory(provided)
+        factory = register_validation(registry, required, name)
+    return factory(required)
 
 
 ## uggg.

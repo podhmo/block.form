@@ -82,15 +82,16 @@ class ValidationQueue(object):
         self.validators = validators or []
 
     def add(self, name, validation, pick_extra=None):
-        for _, other, _ in self.validators:
-            if other == validation:
-                return self.on_conflict(name, validation, pick_extra)
+        for _, other, pick_extra2 in self.validators:
+            if other == validation or (other.__name__ == validation.__name__  and pick_extra.__name__ == pick_extra2.__name__):
+                return self.on_conflict(name, validation, other, pick_extra)
         append_validators(self.validators, name, validation, pick_extra=pick_extra)
 
 
-    def on_conflict(self, name, validation, pick_extra):
+
+    def on_conflict(self, name, validation, other, pick_extra):
         logger.warning("name:{}, function:{} is already added. overwrite it.".format(name, validation))
-        pop_validators(self.validators, validation)
+        self.validators = pop_validators(self.validators, other)
         append_validators(self.validators, name, validation, pick_extra)
 
     def __iter__(self):
@@ -123,23 +124,23 @@ class ValidationRepository(object):
         self.QueueClass = QueueClass or ValidationQueue
         self.store = {}
 
-    def __getitem__(self, schema):
+    def __getitem__(self, keyname):
         try:
-            return self.store[schema]
+            return self.store[keyname]
         except KeyError:
-            return self.create_default(schema)
+            return self.create_default(keyname)
 
-    def create_default(self, schema):
-        queue = self.store[schema] = self.QueueClass(name=repr(schema))
+    def create_default(self, keyname):
+        queue = self.store[keyname] = self.QueueClass(name=repr(keyname))
         return queue
 
-    def add(self, schema, *args, **kwargs):
-        self[schema].add(*args, **kwargs)
+    def add(self, keyname, *args, **kwargs):
+        self[keyname].add(*args, **kwargs)
 
-    def config(self, schema, name, positionals=None, optionals=None):
+    def config(self, keyname, name, positionals=None, optionals=None):
         def wrapped(fn):
             pick_extra = generate_pikup_function(positionals=positionals, optionals=optionals)
-            self.add(schema, name, fn, pick_extra=pick_extra)
+            self.add(keyname, name, fn, pick_extra=pick_extra)
             return fn
         return wrapped
 

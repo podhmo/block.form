@@ -18,6 +18,7 @@ def generate_pikup_function(positionals=None, optionals=None):
             if v:
                 kwargs[put_k] = v
         return cb(data, *args, **kwargs)
+    pick.__name__ = "{!r}_{!r}".format(positionals, optionals)
     return pick
 
 def pickup(positionals=None, optionals=None):
