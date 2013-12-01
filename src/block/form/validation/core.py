@@ -83,7 +83,9 @@ class ValidationQueue(object):
 
     def add(self, name, validation, pick_extra=None):
         for _, other, pick_extra2 in self.validators:
-            if other == validation or (other.__name__ == validation.__name__  and pick_extra.__name__ == pick_extra2.__name__):
+            if other == validation or (
+                    other.__name__ == validation.__name__ 
+                    and pick_extra.__name__ == pick_extra2.__name__):
                 return self.on_conflict(name, validation, other, pick_extra)
         append_validators(self.validators, name, validation, pick_extra=pick_extra)
 

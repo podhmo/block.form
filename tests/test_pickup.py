@@ -20,5 +20,24 @@ class AddPickTests(unittest.TestCase):
         self.assertTrue(hasattr(validation, "pick_extra"))
         validation.pick_extra(validation, input_data, {"id": 1, "session": DBSession, "login_user": login_user})
 
+class RepositoryDuplicateDefinitionTests(unittest.TestCase):
+    def _add_validation(self, repository, mark):
+        @repository.config(mark, "id", optionals=["id"])
+        def callback(data, id=1):
+            pass
+
+    def test_it(self):
+        from block.form.validation import validation_repository_factory
+        repository = validation_repository_factory()
+        mark = object()
+
+        self.assertEqual(len(repository[mark].validators), 0)
+        self._add_validation(repository, mark)
+        self.assertEqual(len(repository[mark].validators), 1)
+        self._add_validation(repository, mark)
+        self.assertEqual(len(repository[mark].validators), 1)
+        self._add_validation(repository, mark)
+        self.assertEqual(len(repository[mark].validators), 1)
+
 if __name__ == '__main__':
     unittest.main()
