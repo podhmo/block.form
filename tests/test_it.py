@@ -1,6 +1,7 @@
 # -*- coding:utf-8 -*-
 import unittest
 
+import re
 import colander as co
 from block.form import Schema
 
@@ -75,8 +76,28 @@ class BoundaryTests(PyramidTest):
 
         DB = {"*inserted name*"}
 
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(ValidationError) as e:
+            e.expected_regex = re.compile("conflict")
             boundary.validate({"name": "*inserted name*"}, db=DB)
+
+    def test_boundary__add_validation_runtime(self):
+        from block.form.validation import get_validation
+        from block.form.validation import ValidationError
+
+        request = testing.DummyRequest(registry=self.config.registry)
+        boundary = get_validation(request, UserSchema())
+        class InvalidStatus(Exception):
+            pass
+        def new_validation(data):
+            if not "token" in data:
+                raise InvalidStatus("oops")
+        boundary.add("token", new_validation)
+
+        DB = {"*inserted name*"}
+
+        with self.assertRaises(ValidationError) as e:
+            e.expected_regex = re.compile("oops")
+            boundary.validate({"name": "*new name*"}, db=DB)
 
 
 if __name__ == '__main__':

@@ -26,18 +26,34 @@ class ColanderSchemaControl(object):
 class AppendListErrorControl(object):
     def __init__(self, mapping, on_not_defined=None, fallback=None):
         self.mapping = mapping
-        self.on_not_defined = on_not_defined or self.default_fallback
+        self.on_not_defined = on_not_defined or self.default_not_defined
         self.fallback = fallback or self.default_fallback
 
     def __call__(self, data, name, exc, errors):
         try:
-            message = self.mapping[exc.__class__].format(exc.args[0])
-            errors[name].append(message)
+            fmt = self.mapping[exc.__class__]
         except KeyError as e:
-            self.on_not_defined(data, name, e, errors, original=exc)
+            return self.on_not_defined(data, name, e, errors, original=exc)
         except Exception as e:
-            self.fallback(data, name, e, errors, original=exc)
+            return self.fallback(data, name, e, errors, original=exc)
 
+        try:
+            data = exc.args[0]
+            if hasattr(data, "items"):
+                message = fmt.format(**data)
+            elif isinstance(data, (tuple, list)):
+                message = fmt.format(*data)
+            else:
+                message = fmt.format(data)
+            errors[name].append(message)
+        except (KeyError, IndexError):
+            logger.warning("format unmatched. fmt={!r} exc={!r}".format(fmt, repr(exc)))
+            errors[name].append("fmt={}, exc={}".format(fmt, repr(exc)))
+
+    def default_not_defined(self, data, name, exc, errors, original=None):
+        exc = original
+        logger.warning("mapping not defined. exc={!r}".format(repr(exc)))
+        errors[name].append(repr(exc))
 
     def default_fallback(self, data, name, exc, errors, original=None):
         raise exc
@@ -49,7 +65,7 @@ class AppendListErrorControl(object):
 
 
 def append_validators(queue, name, v, pick_extra=None):
-    pick = pick_extra or getattr(v, "pick_extra")
+    pick = pick_extra or getattr(v, "pick_extra", None)
     queue.append((name, v, pick))
 
 def pop_validators(queue, that):
@@ -60,15 +76,15 @@ class ValidationQueue(object):
     def __init__(self, validators=None, name=None):
         self.validators = validators or []
 
-    def add(self, name, v, pick_extra=None):
+    def add(self, name, validation, pick_extra=None):
         for _, other, _ in self.validators:
-            if other == v:
-                return self.on_conflict(name, v, pick_extra)
-        append_validators(self.validators, name, v, pick_extra=pick_extra)
+            if other == validation:
+                return self.on_conflict(name, validation, pick_extra)
+        append_validators(self.validators, name, validation, pick_extra=pick_extra)
 
 
     def on_conflict(self, name, validation, pick_extra):
-        logger.warn("name:{}, function:{} is already added. overwrite it.".format(name, validation))
+        logger.warning("name:{}, function:{} is already added. overwrite it.".format(name, validation))
         pop_validators(self.validators, validation)
         append_validators(self.validators, name, validation, pick_extra)
 
@@ -86,7 +102,7 @@ class ValidationIterator(object):
         self.individual_queue = []
 
     def add(self, name, validation, pick_extra=None):
-        append_validators(self.individual_queue, validation, pick_extra=pick_extra)
+        append_validators(self.individual_queue, name, validation, pick_extra=pick_extra)
 
     def __iter__(self):
         for name, validation, pick_extra in itertools.chain(self.queue, self.individual_queue):

@@ -20,12 +20,16 @@ class ValidationBoundary(object):
         self.error_control = error_control
         self.validation_queue = validation_queue
         self.individual_validations = []
+        self.extra = {}
 
-    def add(self, name, v, pick_extra=None):
-        self.individual_validations.append((name, v, pick_extra))
+    def add(self, name, validation, pick_extra=None):
+        self.individual_validations.append((name, validation, pick_extra))
 
     def get_iterator(self, extra):
-        iterator = self.validation_queue(extra)
+        kwargs = {}
+        kwargs.update(self.extra)
+        kwargs.update(extra)
+        iterator = self.validation_queue(kwargs)
 
         for name, validation, pick_extra in self.individual_validations:
             iterator.add(name, validation, pick_extra=pick_extra)
@@ -60,12 +64,12 @@ def includeme(config):
     def check__dependent_components():
         control = config.registry.queryUtility(IErrorControl)
         if control is None:
-            raise ConfigurationError("forgetting:: calling config.block_set_error_control ?")
+            raise ConfigurationError("forgetting:: calling config.block_set_error_control ?\n (please autocommit option is false)")
 
         repository = config.registry.queryUtility(IValidationRepository)
         if repository is None:
-            raise ConfigurationError("forgeting:: calling config.block_set_validation_repository ?")
-    config.action(None, check__dependent_components)
+            raise ConfigurationError("forgeting:: calling config.block_set_validation_repository ?\n (please autocommit option is false)")
+    config.action(None, check__dependent_components, order=9999)
 
 
 ## use definition phase
@@ -76,13 +80,13 @@ def validation_repository_factory(QueueClass=None):
 
 ## use configugration phase
 def set_schema_control(config, control):
-    config.registry.registerUtility(control, ISchemaControl)
+    config.registry.registerUtility(config.maybe_dotted(control), ISchemaControl)
 
 def set_error_control(config, control):
-    config.registry.registerUtility(control, IErrorControl)
+    config.registry.registerUtility(config.maybe_dotted(control), IErrorControl)
 
 def set_validation_repository(config, repository):
-    config.registry.registerUtility(repository, IValidationRepository)
+    config.registry.registerUtility(config.maybe_dotted(repository), IValidationRepository)
 
 def register_validation(registry, required, schema, name):
     schema_control = registry.getUtility(ISchemaControl)
