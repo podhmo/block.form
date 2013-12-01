@@ -17,19 +17,32 @@ class FieldProxy(object):
         self.__dict__["node"] = node
         self.__dict__["is_changed"] = False
 
+    def __getitem__(self, k):
+        v = self.node[k]
+        if hasattr(v, "typ"):
+            return self.__class__(self, k, v)
+        else:
+            return v
+
     def __getattr__(self, k):
         return getattr(self.node, k)
 
+    def clone(self):
+        if isinstance(self.schema, FieldProxy):
+            self.__dict__["schema"] = self.schema.clone()
+        self.__dict__["is_changed"] = True
+        new_node = self.__dict__["node"].clone()
+        self.__dict__["node"] = new_node
+        self.schema[self.name] = new_node
+        return new_node
+
     def __setattr__(self, k, v):
         if not self.is_changed:
-            self.__dict__["is_changed"] = True
-            new_node = self.__dict__["node"].clone()
-            self.__dict__["node"] = new_node
-            self.schema[self.name] = new_node
+            self.clone()
         setattr(self.node, k, v)
 
 
-class Form(object): #only support colander, nesting structure is not supported.
+class Form(object): #only support colander
     name = ""
     def __init__(self, schema, params=None, errors=None, action="#", configure=None):
         self.configure = configure

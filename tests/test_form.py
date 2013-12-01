@@ -187,6 +187,13 @@ class Tests(unittest.TestCase):
         self.assertEqual(fields[0][0].name, "day")
         self.assertEqual(fields[0][1], {"year": "2013", "month": "1", "day": "1"})
 
+        ## editing nested node
+        self.assertEqual(target.day["year"].widget, "select")
+        target.day["year"].widget = "myselect"
+        self.assertEqual(target.day["year"].widget, "myselect")
+
+        target2 = self._makeOne(Schema())
+        self.assertEqual(target2.day["year"].widget, "select")
 
 if __name__ == '__main__':
     unittest.main()
