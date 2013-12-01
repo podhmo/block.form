@@ -1,34 +1,22 @@
 # -*- coding:utf-8 -*-
-import colander as co
-from colander import Invalid
 import itertools
 
 import logging
 logger = logging.getLogger(__name__)
 
-from . import ValidationError
-from .pickup import generate_pikup_function
+from collections import defaultdict
+from colander import Invalid
 from zope.interface import implementer
 from pyramid.exceptions import ConfigurationError
+
+from . import ValidationError
+from .pickup import generate_pikup_function
 from ..interfaces import (
-    ISchemaControl,
     IErrorControl,
-    IValidationRepository
+    IValidationRepository,
+    IValidationBoundary,
+
 )
-
-@implementer(ISchemaControl)
-class ColanderSchemaControl(object):
-    def get_class(self, schema):
-        if isinstance(schema, co._SchemaMeta):
-            return schema
-        else:
-            return schema.__class__
-
-    def __call__(self, schema, params):
-        try:
-            return schema.deserialize(params)
-        except Invalid as e:
-            raise ValidationError(e.asdict())
 
 @implementer(IErrorControl)
 class AppendListErrorControl(object):
@@ -128,6 +116,7 @@ class ValidationIterator(object):
             else:
                 yield name, validation
 
+
 @implementer(IValidationRepository)
 class ValidationRepository(object):
     def __init__(self, QueueClass=None):
@@ -153,3 +142,68 @@ class ValidationRepository(object):
             self.add(schema, name, fn, pick_extra=pick_extra)
             return fn
         return wrapped
+
+
+@implementer(IValidationBoundary)
+class PreparedBoundary(object):
+    def __init__(self, schema,
+                 next_boundary=None,
+                 individual_validations=None,
+                 extra=None):
+        self.schema = schema
+        self.next_boundary = next_boundary
+        self.individual_validations = individual_validations or []
+        self.extra = extra or {}
+
+    def add(self, name, validation, pick_extra=None):
+        self.individual_validations.append((name, validation, pick_extra))
+
+    def validate(self, data, **extra):
+        try:
+            qualified_data = self.schema.deserialize(data)
+        except Invalid as e:
+            raise ValidationError(e.asdict())
+
+        if self.next_boundary is None:
+            return qualified_data
+
+        next_boundary = self.next_boundary(
+            self.schema,
+            individual_validations=self.individual_validations,
+            extra=self.extra)
+        return next_boundary.validate(qualified_data, **extra)
+
+
+@implementer(IValidationBoundary)
+class ValidationBoundary(object):
+    def __init__(self, error_control, validation_queue,
+                 individual_validations=None,
+                 extra=None):
+        self.error_control = error_control
+        self.validation_queue = validation_queue
+        self.individual_validations = individual_validations or []
+        self.extra = extra or {}
+
+    def add(self, name, validation, pick_extra=None):
+        self.individual_validations.append((name, validation, pick_extra))
+
+    def get_iterator(self, extra):
+        kwargs = {}
+        kwargs.update(self.extra)
+        kwargs.update(extra)
+        iterator = self.validation_queue(kwargs)
+
+        for name, validation, pick_extra in self.individual_validations:
+            iterator.add(name, validation, pick_extra=pick_extra)
+        return iterator
+
+    def validate(self, qualified_data, **extra):
+        errors = defaultdict(list)
+        iterator = self.get_iterator(extra)
+
+        for name, validation in iterator:
+            try:
+                validation(qualified_data)
+            except Exception as e:
+                self.error_control(qualified_data, name, e, errors)
+        return self.error_control.finish(qualified_data, errors)

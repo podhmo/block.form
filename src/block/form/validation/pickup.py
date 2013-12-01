@@ -22,8 +22,8 @@ def generate_pikup_function(positionals=None, optionals=None):
 
 def pickup(positionals=None, optionals=None):
     def _wrapped(validation_fn):
-        if hasattr(validation_fn, "pick"):
-            logger.warn("{} has pick, already. overwrite it".format(validation_fn))
+        if hasattr(validation_fn, "pick_extra"):
+            logger.warning("{} has pick, already. overwrite it".format(validation_fn))
         pick = generate_pikup_function(positionals=positionals, optionals=optionals)
         validation_fn.pick_extra = pick
         return validation_fn

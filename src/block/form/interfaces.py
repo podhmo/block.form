@@ -8,15 +8,13 @@ class ISequence(Interface):
 class IBlockSchema(Interface):
     pass
 
-class ISchemaControl(Interface):
-    def __call__(schema, params):
-        pass
-
 class IErrorControl(Interface):
     def __call__(data, name, exc, errors):
         pass
 
 class IValidationBoundary(Interface):
+    def add(name, validation, pick_extra=None):
+        pass
     def validate(params, **extra):
         pass
 

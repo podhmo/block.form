@@ -1,12 +1,18 @@
 # -*- coding:utf-8 -*-
-from zope.interface import providedBy, provider
-from collections import defaultdict
+from zope.interface.interface import InterfaceClass
+from zope.interface import (
+    providedBy,
+    provider
+)
+import logging
+logger = logging.getLogger(__name__)
+
 from ..interfaces import(
-    ISchemaControl,
     IErrorControl,
     IValidationRepository,
     IValidationBoundaryFactory,
-    ISequence
+    ISequence,
+    IBlockSchema
 )
 
 class ValidationError(Exception):
@@ -14,68 +20,18 @@ class ValidationError(Exception):
     def errors(self):
         return self.args[0]
 
-class ValidationBoundary(object):
-    def __init__(self, schema_control, error_control, schema, validation_queue):
-        self.schema = schema
-        self.schema_control = schema_control
-        self.error_control = error_control
-        self.validation_queue = validation_queue
-        self.individual_validations = []
-        self.extra = {}
-
-    def add(self, name, validation, pick_extra=None):
-        self.individual_validations.append((name, validation, pick_extra))
-
-    def get_iterator(self, extra):
-        kwargs = {}
-        kwargs.update(self.extra)
-        kwargs.update(extra)
-        iterator = self.validation_queue(kwargs)
-
-        for name, validation, pick_extra in self.individual_validations:
-            iterator.add(name, validation, pick_extra=pick_extra)
-        return iterator
-
-    def validate(self, params, **extra):
-        qualified_data = self.schema_control(self.schema, params)
-        errors = defaultdict(list)
-        iterator = self.get_iterator(extra)
-
-        for name, validation in iterator:
-            try:
-                validation(qualified_data)
-            except Exception as e:
-                self.error_control(qualified_data, name, e, errors)
-        return self.error_control.finish(qualified_data, errors)
-
 
 def add_block_directive(config, name, fn):
     config.add_directive("block_{}".format(name), fn)
 
 
 def includeme(config):
-    add_block_directive(config, "set_schema_control", set_schema_control)
     add_block_directive(config, "set_error_control", set_error_control)
     add_block_directive(config, "set_validation_repository", set_validation_repository)
     add_block_directive(config, "add_error_mapping", add_error_mapping)
 
-    from .core import ColanderSchemaControl
-    config.block_set_schema_control(ColanderSchemaControl())
-
-    from pyramid.exceptions import ConfigurationError
     def check__dependent_components(config):
-        control = config.registry.queryUtility(IErrorControl)
-        if control is None:
-            raise ConfigurationError("forgetting:: calling config.block_set_error_control ?\n (please autocommit option is false)")
-
-        queue = config.registry.adapters.lookup1(IErrorControl, ISequence)
-        if queue:
-            for mapping, strict in queue:
-                control.update_mapping(mapping, strict=strict)
-
-        repository = config.registry.queryUtility(IValidationRepository)
-        if repository is None:
-            raise ConfigurationError("forgeting:: calling config.block_set_validation_repository ?\n (please autocommit option is false)")
+        RegisterSchemaValidation(config).register()
     config.action(None, check__dependent_components, args=(config, ), order=9999)
 
 
@@ -86,9 +42,6 @@ def validation_repository_factory(QueueClass=None):
 
 
 ## use configugration phase
-def set_schema_control(config, control):
-    config.registry.registerUtility(config.maybe_dotted(control), ISchemaControl)
-
 def set_error_control(config, control):
     config.registry.registerUtility(config.maybe_dotted(control), IErrorControl)
 
@@ -100,32 +53,94 @@ def add_error_mapping(config, mapping, strict=True):
     queue.append((mapping, strict))
 
 
-def set_validation_repository(config, repository):
-    config.registry.registerUtility(config.maybe_dotted(repository), IValidationRepository)
-
-def register_validation(registry, required, schema, name):
-    schema_control = registry.getUtility(ISchemaControl)
-    error_control = registry.getUtility(IErrorControl)
-    schema_class = schema_control.get_class(schema)
-    repository = registry.getUtility(IValidationRepository)
-    def create_validation(schema):
-        return ValidationBoundary(schema_control,
-                                  error_control,
-                                  schema,
-                                  repository[schema_class]
-        )
-    create_validation.__name__ = "validation_for_{schema!r}".format(schema=schema)
-    registry.adapters.register(required, IValidationBoundaryFactory, name, create_validation)
-    return create_validation
+def set_validation_repository(config, repository, overwrite=False):
+    repository = config.maybe_dotted(repository)
+    if config.registry.queryUtility(repository, IValidationRepository):
+        if not overwrite:
+            from pyramid.exceptions import ConfigurationError
+            raise ConfigurationError("validation repository is already set.")
+        else:
+            logger.warning("validation repository is already set. overwrite.")
+    config.registry.registerUtility(repository, IValidationRepository)
 
 
 ## use runtime phase .. api
-def get_validation(request, schema, name=""):
+def register_validation(registry, required, name):
+    from .core import ValidationBoundary
+    error_control = registry.getUtility(IErrorControl)
+    repository = registry.getUtility(IValidationRepository)
+
+    @provider(IValidationBoundaryFactory)
+    def factory(required):
+        queue = repository[required]
+        return ValidationBoundary(error_control, queue)
+    registry.adapters.register(required, IValidationBoundaryFactory, name, factory)
+    return factory
+
+
+def normalize_provided1(provided):
+    if isinstance(provided, InterfaceClass):
+        return provided
+    else:
+        return providedBy(provided)
+
+def get_validation(request, provided, name=""):
+    iface = normalize_provided1(provided)
     registry = request.registry
-    required = [providedBy(schema), ISchemaControl, IErrorControl]
-    factory = registry.adapters.lookup(required, IValidationBoundaryFactory, name=name)
+    factory = registry.adapters.lookup([iface], IValidationBoundaryFactory, name=name)
     if factory is None:
         ## speedup
-        factory = register_validation(registry, required, schema, name)
-    return factory(schema)
+        factory = register_validation(registry, iface, name)
+    return factory(provided)
+
+
+## uggg.
+class RegisterSchemaValidation(object):
+    def __init__(self, config):
+        self.config = config
+
+    def register(self):
+        control = self.prepare_for_control()
+        repository = self.prepare_for_repository(control)
+        self.prepare_for_schema(control, repository)
+
+    def prepare_for_control(self):
+        from pyramid.exceptions import ConfigurationError
+        control = self.config.registry.queryUtility(IErrorControl)
+        if control is None:
+            raise ConfigurationError("""
+            forgetting:: calling config.block_set_error_control ?
+            (please autocommit option is false)""")
+        return control
+
+    def prepare_for_repository(self, control):
+        from pyramid.exceptions import ConfigurationError
+        queue = self.config.registry.adapters.lookup1(IErrorControl, ISequence)
+        if queue:
+            for mapping, strict in queue:
+                control.update_mapping(mapping, strict=strict)
+
+        repository = self.config.registry.queryUtility(IValidationRepository)
+        if repository is None:
+            raise ConfigurationError("""
+            forgeting:: calling config.block_set_validation_repository ?
+            (please autocommit option is false)""")
+        return repository
+
+    def prepare_for_schema(self, error_control, repository):
+        from .core import (
+            ValidationBoundary,
+            PreparedBoundary
+        )
+        registry = self.config.registry
+        def next_boundary(schema, individual_validations, extra):
+            queue = repository[schema.__class__] #hmm.
+            return ValidationBoundary(error_control, queue,
+                                      individual_validations=individual_validations,
+                                      extra=extra)
+
+        @provider(IValidationBoundaryFactory)
+        def factory(schema):
+            return PreparedBoundary(schema, next_boundary)
+        registry.adapters.register([IBlockSchema], IValidationBoundaryFactory, "", factory)
 

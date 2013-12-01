@@ -66,6 +66,7 @@ class BoundaryTests(PyramidTest):
             if data["name"] in db:
                 raise NameConflict(data["name"])
         self.repository = validations
+        self.config.commit()
 
     def test_boundary(self):
         from block.form.validation import get_validation
@@ -75,7 +76,6 @@ class BoundaryTests(PyramidTest):
         boundary = get_validation(request, UserSchema())
 
         DB = {"*inserted name*"}
-
         with self.assertRaises(ValidationError) as e:
             e.expected_regex = re.compile("conflict")
             boundary.validate({"name": "*inserted name*"}, db=DB)

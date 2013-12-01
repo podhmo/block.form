@@ -93,8 +93,8 @@ class Tests(unittest.TestCase):
         params = {"name": "foo", "age": "20"}
         schema = PersonSchema()
         try:
-            from block.form.validation.core import ColanderSchemaControl
-            ColanderSchemaControl()(schema, params)
+            from block.form.validation.core import PreparedBoundary
+            PreparedBoundary(schema).validate(params)
         except ValidationError as e:
             target = self._makeOne(schema, params, errors=e.errors)
             self.assertEqual(target.raw_values, params)
